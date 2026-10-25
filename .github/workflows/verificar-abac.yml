@@ -1,0 +1,42 @@
+# Prueba de D7 (ABAC del ACR): el CI del equipo puede publicar en team-NN/ pero NO en el prefijo
+# de otro equipo. Se lanza a mano (Actions > Verificar ABAC > Run workflow).
+# Lanzado desde otra rama distinta de main, debe fallar ya al iniciar sesión (OIDC solo para main).
+name: Verificar ABAC
+
+on:
+  workflow_dispatch:
+    inputs:
+      otro_equipo:
+        description: "Equipo ajeno al que se intentará publicar"
+        default: "02"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Publicar en el prefijo propio (debe funcionar) y en el ajeno (debe fallar)
+        env:
+          ACR: ${{ vars.ACR_LOGIN_SERVER }}
+          PROPIO: team-${{ vars.TEAM_ID }}
+          AJENO: team-${{ inputs.otro_equipo }}
+        run: |
+          az acr login --name "${ACR%%.*}"
+          docker pull -q busybox:1.36
+          docker tag busybox:1.36 "$ACR/$PROPIO/verificar-abac:1"
+          docker tag busybox:1.36 "$ACR/$AJENO/verificar-abac:1"
+          echo "== propio ($PROPIO/)"; docker push -q "$ACR/$PROPIO/verificar-abac:1"
+          echo "== ajeno ($AJENO/)"
+          if docker push -q "$ACR/$AJENO/verificar-abac:1"; then
+            echo "FALLA: el CI pudo publicar en $AJENO/ (ABAC no restringe)"; exit 1
+          fi
+          echo "OK: publicar en $AJENO/ fue denegado"
